@@ -1,0 +1,170 @@
+---
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2025 The Linux Foundation
+
+name: "Manual Test 🧪"
+
+# yamllint disable-line rule:truthy
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  test:
+    name: "Quick test"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    timeout-minutes: 5
+    steps:
+        # yamllint disable rule:line-length
+      - uses: step-security/harden-runner@95d9a5deda9de15063e7595e9719c11c38c90ae2 # v2.13.2
+        with:
+          egress-policy: audit
+
+        # yamllint disable rule:line-length
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: "Create release and artifact"
+        id: setup
+        env:
+          GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        shell: bash
+        run: |
+          # Create build artifacts
+          DATE="$(date +%Y-%m-%d-%H%M)"
+          TAG="release-$DATE"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          # Create tag first, then draft release
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG"
+          git push origin "$TAG"
+
+          # Wait a moment for tag to be available
+          sleep 2
+
+          gh release create "$TAG" --draft --title "$TAG" --notes "Test"
+
+          # Verify release was created
+          gh release view "$TAG" || {
+            echo "Failed to create release for tag $TAG"
+            exit 1
+          }
+
+          echo "$DATE" > artifact-01.txt
+          echo "$DATE" > artifact-02.txt
+
+      - name: "List releases and tags"
+        env:
+          GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        shell: bash
+        run: |
+          echo "Listing all releases:"
+          gh release list --limit 10
+          echo ""
+          echo "Listing all tags:"
+          git tag --list "release-*" "second-release-*"
+          echo ""
+          echo "Trying to view release with tag: ${{ steps.setup.outputs.tag }}"
+          gh release view "${{ steps.setup.outputs.tag }}" || echo "Release not found via gh CLI"
+
+      - name: "Upload single artifact [using release tag]"
+        uses: ./
+        with:
+          asset_paths: '["artifact-01.txt"]'
+          release_tag: "${{ steps.setup.outputs.tag }}"
+
+      - name: "Upload artifacts with glob [using release tag]"
+        uses: ./
+        with:
+          asset_paths: '["artifact-*.txt"]'
+          release_tag: "${{ steps.setup.outputs.tag }}"
+          deny_overwrite: false
+
+      - name: "Create second release"
+        id: setup2
+        env:
+          GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        shell: bash
+        run: |
+          # Create second release with tag
+          DATE="$(date +%Y-%m-%d-%H%M)"
+          TAG="second-release-$DATE"
+          RELEASE="Second Release $DATE"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "name=$RELEASE" >> "$GITHUB_OUTPUT"
+
+          # Create tag first, then draft release
+          git tag "$TAG"
+          git push origin "$TAG"
+
+          # Wait a moment for tag to be available
+          sleep 2
+
+          gh release create "$TAG" --draft --title "$RELEASE" --notes "Test"
+
+          # Verify release was created
+          gh release view "$TAG" || {
+            echo "Failed to create release for tag $TAG"
+            exit 1
+          }
+
+      - name: "Upload single artifact [using release name only]"
+        uses: ./
+        with:
+          asset_paths: '["artifact-01.txt"]'
+          release_name: "${{ steps.setup2.outputs.name }}"
+
+      - name: "Upload artifacts with glob [using release name]"
+        uses: ./
+        with:
+          asset_paths: '["artifact-*.txt"]'
+          release_tag: "${{ steps.setup2.outputs.tag }}"
+          release_name: "${{ steps.setup2.outputs.name }}"
+          deny_overwrite: false
+
+  cleanup:
+    name: "Cleanup test releases"
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    timeout-minutes: 2
+    steps:
+      - uses: step-security/harden-runner@95d9a5deda9de15063e7595e9719c11c38c90ae2 # v2.13.2
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: "Delete test releases"
+        env:
+          GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        shell: bash
+        run: |
+          echo "Cleaning up test releases..."
+          gh release list --limit 50 --repo "${{ github.repository }}" | \
+            awk '$3 ~ /^(release-|second-release-)/ {print $3}' | \
+            while read -r tag; do
+              echo "Deleting release: $tag"
+              gh release delete "$tag" --yes --cleanup-tag --repo "${{ github.repository }}" || true
+            done
+
+          echo ""
+          echo "Cleaning up any remaining test tags..."
+          gh api repos/${{ github.repository }}/git/matching-refs/tags/release- \
+            --jq '.[].ref' | sed 's|refs/tags/||' | while read -r tag; do
+            echo "Deleting tag: $tag"
+            gh api -X DELETE "repos/${{ github.repository }}/git/refs/tags/$tag" 2>/dev/null || echo "Tag $tag already deleted"
+          done
+          gh api repos/${{ github.repository }}/git/matching-refs/tags/second-release- \
+            --jq '.[].ref' | sed 's|refs/tags/||' | while read -r tag; do
+            echo "Deleting tag: $tag"
+            gh api -X DELETE "repos/${{ github.repository }}/git/refs/tags/$tag" 2>/dev/null || echo "Tag $tag already deleted"
+          done
+
+          echo "✅ Cleanup complete"

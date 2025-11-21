@@ -1,0 +1,25 @@
+{
+  "name": "release-assets-action",
+  "version": "1.0.0",
+  "description": "GitHub Action to upload assets to GitHub releases with glob pattern support",
+  "private": true,
+  "scripts": {
+    "lint": "eslint scripts/**/*.js",
+    "lint:fix": "eslint scripts/**/*.js --fix"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lfreleng-actions/release-assets-action.git"
+  },
+  "keywords": [
+    "github-actions",
+    "release",
+    "assets",
+    "upload"
+  ],
+  "author": "The Linux Foundation",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "eslint": "^8.57.0"
+  }
+}

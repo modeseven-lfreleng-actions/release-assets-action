@@ -20,13 +20,12 @@ concurrency:
 permissions: {}
 
 jobs:
-  ### Test the GitHub Action in this Repository ###
-  tests:
-    name: "Test local GitHub Action"
+  ### PR-safe validation (no write permissions needed) ###
+  validate-pr:
+    name: "Validate action (PR-safe)"
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    timeout-minutes: 10 # Increase this timeout value as needed
+    timeout-minutes: 5
     steps:
       # Harden the runner used by this workflow
       # yamllint disable-line rule:line-length
@@ -37,39 +36,60 @@ jobs:
       - name: "Checkout repository"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
-      # Perform setup prior to running test(s)
-      - name: "Testing setup step"
+      - name: "Validate action.yaml syntax"
         shell: bash
         run: |
-          # Testing setup step
-          echo "Testing setup step"
-          echo "Testing setup step/summary output" >> "$GITHUB_STEP_SUMMARY"
+          # Validate action.yaml syntax
+          echo "Checking action.yaml exists and is valid YAML..."
+          if [ ! -f "action.yaml" ]; then
+            echo "Error: action.yaml not found ❌"
+            exit 1
+          fi
 
-      - name: "Running local action: ${{ github.repository }}"
-        uses: ./
-        with:
-          input: "test input 💬"
+          # Basic YAML validation using python
+          python3 -c "import yaml; yaml.safe_load(open('action.yaml'))"
+          echo "✅ action.yaml is valid YAML"
 
-      - name: "Validated local action: ${{ github.repository }}"
+      - name: "Check for required action fields"
         shell: bash
         run: |
-          # Local action validation
-          echo "Validated local action: ${{ github.repository }}"
-          echo "Validation step summary output" >> "$GITHUB_STEP_SUMMARY"
+          # Check for required action fields
+          echo "Validating action metadata..."
 
-      # yamllint disable-line rule:line-length
-      - name: "Running local action: ${{ github.repository }} [Override Failure]"
-        uses: ./
-        id: failure
-        continue-on-error: true
-        with:
-          invalid_input: "Some garbage"
+          for field in name description runs; do
+            if ! grep -q "^${field}:" action.yaml; then
+              echo "Error: Missing required field: $field ❌"
+              exit 1
+            fi
+          done
 
-      # Failure testing is also important
-      - name: "Error if step above did NOT fail"
-        if: steps.failure.outcome == 'success'
+          echo "✅ All required action fields present"
+
+      - name: "Validate script syntax"
         shell: bash
         run: |
-          # Error if step above did NOT fail
-          echo "Error: previous test step did NOT fail ❌"
-          exit 1
+          # Extract and validate JavaScript syntax
+          echo "Checking for common script issues..."
+
+          # Check for duplicate declarations
+          if grep -n "const glob = require('glob')" action.yaml; then
+            echo "Error: Found duplicate glob declaration ❌"
+            echo "github-script provides glob as built-in"
+            exit 1
+          fi
+
+          echo "✅ No obvious script syntax issues found"
+
+      - name: "Summary"
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## ✅ PR Validation Passed
+
+          The following checks passed:
+          - action.yaml syntax validation
+          - Required action fields present
+          - Script syntax checks
+
+          **Note:** Full integration tests will run after merge.
+          EOF

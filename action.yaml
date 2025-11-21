@@ -2,36 +2,61 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: 2025 The Linux Foundation
 
-# actions-template
-name: "🛠️ Actions Template"
-description: "Description of action"
-# Any relevant notes/observations can go here
+name: 'Upload Assets to GitHub Release'
+description: |
+  Uploads build artifacts and other workflow assets to a GitHub release.
+  Supports glob patterns and can target releases by tag or name.
 
 inputs:
-  input:
-    description: "Description of input"
+  # Mandatory
+  asset_paths:
+    description: |
+      JSON array of asset paths to upload. Supports glob patterns.
+      Example: '["dist/*.tar.gz", "build/*.zip"]'
     required: true
+  # Optional
+  release_tag:
+    description: |
+      Attach assets to the release with this tag.
+      Defaults to the tag from the GitHub execution environment.
+    required: false
+    default: ''
+  release_name:
+    description: |
+      Attach assets to the release with this name.
+      If both tag and name are specified, they must match.
+    required: false
+    default: ''
+  deny_overwrite:
+    description: |
+      Prevent overwriting existing assets with the same name.
+      Set to false to allow replacing existing assets.
+    required: false
+    default: 'true'
 
 outputs:
-  output:
-    description: "Description of output"
-    value: ${{ steps.code.outputs.output }}
+  download_urls:
+    description: 'JSON array of download URLs for the uploaded assets'
+    value: ${{ steps.upload-assets.outputs.download_urls }}
 
 runs:
-  using: "composite"
+  using: 'composite'
   steps:
-    - name: "Friendly Name"
-      id: code
-      shell: bash
-      run: |
-        # Friendly Name
-        input="${{ inputs.input }}"
-        if [ -z "$input" ]; then
-          echo "Error: mandatory input was not set/configured ❌"
-          exit 1
-        fi
-
-        echo "output=$input" >> "$GITHUB_ENV"
-        echo "output=$input" >> "$GITHUB_OUTPUT"
-        echo "Action received: $input ✅"
-        echo "Action received: $input ✅" >> "$GITHUB_STEP_SUMMARY"
+    - name: 'Upload assets to release'
+      id: upload-assets
+      # yamllint disable-line rule:line-length
+      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+      with:
+        # yamllint disable rule:line-length
+        script: |
+          const script = require('${{ github.action_path }}/scripts/upload-assets.js');
+          await script({
+            github,
+            context,
+            core,
+            glob,
+            assetPathsInput: `${{ inputs.asset_paths }}`,
+            releaseTag: `${{ inputs.release_tag }}`,
+            releaseName: `${{ inputs.release_name }}`,
+            denyOverwrite: `${{ inputs.deny_overwrite }}`
+          });
